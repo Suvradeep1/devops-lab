@@ -22,5 +22,15 @@ pipeline {
                 sh 'docker images my-web-app:v1'
             }
         }
+
+        stage('4. Deploy to Local Server') {
+            steps {
+                echo 'Deploying application container...'
+                // Stop and remove any previously running container with the same name
+                sh 'docker rm -f live-web-app || true'
+                // Launch the updated app container on port 8081
+                sh 'docker run -d --name live-web-app -p 8081:80 my-web-app:v1'
+            }
+        }
     }
 }
