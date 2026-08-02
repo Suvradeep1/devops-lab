@@ -1,36 +1,63 @@
 pipeline {
     agent any
     
+    environment {
+        APP_NAME = 'my-web-app'
+        CONTAINER_NAME = 'live-web-app'
+        HOST_PORT = '8081'
+    }
+
     stages {
-        stage('1. Validate Code') {
+        stage('1. Quality Gate & Code Check') {
             steps {
-                echo 'Checking repository files...'
-                sh 'ls -la'
+                echo "=== Running Quality Checks for Build #${BUILD_NUMBER} ==="
+                sh '''
+                    # Check 1: File existence
+                    if [ ! -f index.html ]; then
+                        echo "ERROR: index.html is missing!"
+                        exit 1
+                    fi
+
+                    # Check 2: Non-empty file check
+                    if [ ! -s index.html ]; then
+                        echo "ERROR: index.html is empty!"
+                        exit 1
+                    fi
+
+                    echo "Quality Gate Passed: Required files present and valid."
+                '''
             }
         }
         
-        stage('2. Build Docker Image') {
+        stage('2. Build Dynamic Image') {
             steps {
-                echo 'Building Docker container image locally...'
-                sh 'docker build -t my-web-app:v1 .'
+                echo "Building image: ${env.APP_NAME}:${BUILD_NUMBER}"
+                sh "docker build -t ${env.APP_NAME}:${BUILD_NUMBER} ."
             }
         }
         
-        stage('3. Verify Local Image') {
+        stage('3. Verify Built Artifact') {
             steps {
-                echo 'Checking built images on host...'
-                sh 'docker images my-web-app:v1'
+                echo "Verifying image ${env.APP_NAME}:${BUILD_NUMBER} in local registry..."
+                sh "docker images ${env.APP_NAME}:${BUILD_NUMBER}"
             }
         }
 
-        stage('4. Deploy to Local Server') {
+        stage('4. Deploy Application') {
             steps {
-                echo 'Deploying application container...'
-                // Stop and remove any previously running container with the same name
-                sh 'docker rm -f live-web-app || true'
-                // Launch the updated app container on port 8081
-                sh 'docker run -d --name live-web-app -p 8081:80 my-web-app:v1'
+                echo "Deploying container ${env.CONTAINER_NAME} with version ${BUILD_NUMBER}..."
+                sh "docker rm -f ${env.CONTAINER_NAME} || true"
+                sh "docker run -d --name ${env.CONTAINER_NAME} -p ${env.HOST_PORT}:80 ${env.APP_NAME}:${BUILD_NUMBER}"
             }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline run completed for Build #${BUILD_NUMBER}."
+        }
+        failure {
+            echo "ALERT: Pipeline failed! Deployment aborted. Previous container version remains live."
         }
     }
 }
