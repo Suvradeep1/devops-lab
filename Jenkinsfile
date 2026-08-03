@@ -2,62 +2,47 @@ pipeline {
     agent any
     
     environment {
+        DOCKER_USER = 'suvro321'
         APP_NAME = 'my-web-app'
         CONTAINER_NAME = 'live-web-app'
         HOST_PORT = '8081'
     }
 
     stages {
-        stage('1. Quality Gate & Code Check') {
+        stage('1. Quality Gate') {
             steps {
-                echo "=== Running Quality Checks for Build #${BUILD_NUMBER} ==="
-                sh '''
-                    # Check 1: File existence
-                    if [ ! -f index.html ]; then
-                        echo "ERROR: index.html is missing!"
-                        exit 1
-                    fi
-
-                    # Check 2: Non-empty file check
-                    if [ ! -s index.html ]; then
-                        echo "ERROR: index.html is empty!"
-                        exit 1
-                    fi
-
-                    echo "Quality Gate Passed: Required files present and valid."
-                '''
+                sh '[ -f index.html ] && [ -s index.html ]'
             }
         }
         
-        stage('2. Build Dynamic Image') {
+        stage('2. Build Image') {
             steps {
-                echo "Building image: ${env.APP_NAME}:${BUILD_NUMBER}"
-                sh "docker build -t ${env.APP_NAME}:${BUILD_NUMBER} ."
+                sh "docker build -t ${env.DOCKER_USER}/${env.APP_NAME}:${BUILD_NUMBER} ."
             }
         }
-        
-        stage('3. Verify Built Artifact') {
+
+        stage('3. Push to Docker Hub') {
             steps {
-                echo "Verifying image ${env.APP_NAME}:${BUILD_NUMBER} in local registry..."
-                sh "docker images ${env.APP_NAME}:${BUILD_NUMBER}"
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh 'echo $PASS | docker login -u $USER --password-stdin'
+                    sh "docker push ${env.DOCKER_USER}/${env.APP_NAME}:${BUILD_NUMBER}"
+                }
             }
         }
 
         stage('4. Deploy Application') {
             steps {
-                echo "Deploying container ${env.CONTAINER_NAME} with version ${BUILD_NUMBER}..."
                 sh "docker rm -f ${env.CONTAINER_NAME} || true"
-                sh "docker run -d --name ${env.CONTAINER_NAME} -p ${env.HOST_PORT}:80 ${env.APP_NAME}:${BUILD_NUMBER}"
+                sh "docker run -d --name ${env.CONTAINER_NAME} -p ${env.HOST_PORT}:80 ${env.DOCKER_USER}/${env.APP_NAME}:${BUILD_NUMBER}"
             }
         }
     }
 
     post {
         always {
-            echo "Pipeline run completed for Build #${BUILD_NUMBER}."
-        }
-        failure {
-            echo "ALERT: Pipeline failed! Deployment aborted. Previous container version remains live."
+            echo "Cleaning up local build image to save disk space..."
+            sh "docker rmi ${env.DOCKER_USER}/${env.APP_NAME}:${BUILD_NUMBER} || true"
+            sh "docker image prune -f"
         }
     }
 }
